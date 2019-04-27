@@ -1,0 +1,18 @@
+spring:
+  profiles:
+    include:
+      - datasource
+---
+spring.profiles: local
+
+---
+spring.profiles: test
+
+---
+spring.profiles: dev
+
+---
+spring.profiles: beta
+
+---
+spring.profiles: prod
