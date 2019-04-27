@@ -1,0 +1,245 @@
+def javaProjects = [project(":common"), project(":core"), project(":api"), project(":admin"), project(":batch")]
+def springBootProjects = [project(":common"), project(":core"), project(":api"), project(":admin"), project(":batch")]
+def requiredIntegrationTestProjects = [project(":api"), project(":admin"), project(":batch")]
+def querydslProjects = [project(":core")]
+def requiredWebSecurity = [project(":api"), project(":admin")]
+def deployJarProjects = [project(":api"), project(":admin")]
+
+/**
+ * 프로젝트에서 사용할 바이너리 플러그인 정의
+ * @see <a href="https://plugins.gradle.org">https://plugins.gradle.org</a>
+ */
+buildscript {
+    ext {
+        springBootVersion = '2.0.4.RELEASE'
+        querydslVersion = "1.0.10"
+        asciidocGradleVersion = '1.5.8.1'
+    }
+    repositories {
+        mavenCentral()
+        maven {
+            url "https://plugins.gradle.org/m2/"
+        }
+    }
+    dependencies {
+        classpath("org.springframework.boot:spring-boot-gradle-plugin:${springBootVersion}")
+        classpath("gradle.plugin.com.ewerk.gradle.plugins:querydsl-plugin:${querydslVersion}")
+        classpath("org.asciidoctor:asciidoctor-gradle-plugin:${asciidocGradleVersion}")
+    }
+}
+
+ext {
+    lombokVer = "1.18.2"
+}
+
+/**
+ * 하위프로젝트 공통선언
+ */
+subprojects {
+    group = 'io.honeymon.springboot'
+
+    repositories {
+        mavenCentral()
+    }
+}
+
+
+configure(javaProjects) {
+    apply plugin: 'java'
+    apply plugin: 'eclipse'
+    apply plugin: 'idea'
+
+    sourceCompatibility = 1.8
+    compileJava.options.encoding = 'UTF-8'
+    
+    dependencies {
+    	compile "javax.xml.bind:jaxb-api"
+    }
+}
+
+configure(springBootProjects) {
+    apply plugin: 'org.springframework.boot'
+    apply plugin: 'io.spring.dependency-management'
+
+    bootJar.enabled = true
+
+    dependencyManagement { // 스프링 부트에서 관리하는 의존성 라이브러리 버전변경
+        dependencies {
+            dependency "org.projectlombok:lombok:${lombokVer}"
+        }
+    }
+
+    dependencies {
+        compile('org.springframework.boot:spring-boot-starter-logging')
+
+        testCompile('org.springframework.boot:spring-boot-starter-test')
+    }
+}
+
+configure(requiredIntegrationTestProjects) {
+    apply plugin: 'java'
+
+    sourceSets {
+        integrationTest {
+            java.srcDir file("src/integration-test/java")
+            resources.srcDir file("src/integration-test/resources")
+
+            compileClasspath = sourceSets.main.output + configurations.testRuntime
+            runtimeClasspath = output + compileClasspath
+        }
+    }
+
+    dependencies {
+        testCompile "org.dbunit:dbunit:2.5.2"
+        testCompile "com.github.springtestdbunit:spring-test-dbunit:1.3.0"
+    }
+
+    task integrationTest(type: Test) {
+        testClassesDirs = sourceSets.integrationTest.output.classesDirs
+        classpath = sourceSets.integrationTest.runtimeClasspath
+    }
+
+    check.dependsOn integrationTest
+}
+
+configure(requiredWebSecurity) {
+//	dependencies {
+//        compile("org.springframework.boot:spring-boot-starter-security")
+//    }
+}
+
+/**
+ * <Code>@Entity</code> 객체를 찾아서 QueryDSL로 컴파일하여 엔티티맵으로 사용할 수 있게 해줌
+ * @see <a href="https://github.com/ewerk/gradle-plugins/tree/master/querydsl-plugin">Querydsl Plugin</a>
+ */
+configure(querydslProjects) {
+    apply plugin: "com.ewerk.gradle.plugins.querydsl"
+
+    def querydslDir = "src/querydsl/java"
+    querydsl {
+        jpa = true
+        querydslSourcesDir = querydslDir
+    }
+
+    sourceSets {
+        main {
+            java {
+                srcDir querydslDir
+            }
+        }
+    }
+}
+
+
+
+project(":common") {
+    description = "프로젝트 공통 모듈: 유틸리티, 기타 DTO 등 제공"
+
+    version = '0.0.1-SNAPSHOT'
+
+    bootJar.enabled = false
+    jar.enabled = true
+
+    dependencies {
+        compile('org.projectlombok:lombok')
+        compile('org.springframework:spring-context')
+    }
+}
+
+project(":core") {
+    description = "프로젝트 코어 모듈: 도메인(Entity, Repository), 서비스 정의"
+
+    version = '0.0.1-SNAPSHOT'
+
+    bootJar.enabled = false
+    jar.enabled = true
+
+    dependencies {
+        compile project(":common")
+
+        compile('org.springframework.boot:spring-boot-starter-data-jpa')
+        compile("org.flywaydb:flyway-core")
+
+        runtime('org.springframework.boot:spring-boot-devtools')
+        runtime('com.h2database:h2')
+        runtime('mysql:mysql-connector-java')
+
+        compileOnly('org.springframework.boot:spring-boot-configuration-processor')
+    }
+}
+
+project(":api") {
+    description = "외부 노출 API 모듈: @RestController 이용"    
+    apply plugin: "org.asciidoctor.convert"
+
+    version = '0.0.1-SNAPSHOT'
+
+    dependencies {
+        compile project(":core")
+
+        compile('org.springframework.boot:spring-boot-starter-web')
+
+        testCompile('org.springframework.restdocs:spring-restdocs-mockmvc') // API 문서 제공
+        asciidoctor 'org.springframework.restdocs:spring-restdocs-asciidoctor' 
+    }
+    
+    ext { 
+		snippetsDir = file('build/generated-snippets')
+	}
+
+    integrationTest {
+		outputs.dir snippetsDir
+	}
+	
+	asciidoctor { 
+		inputs.dir snippetsDir
+		dependsOn integrationTest
+		attributes 'snippets': "${snippetsDir}", 'doctype': 'book', 'page-layout': 'docs', 
+			'toc': 'left', 'toclevels': '4', 'source-highlighter': 'coderay'
+	}
+	
+	bootJar {
+		dependsOn asciidoctor 
+		from ("${asciidoctor.outputDir}/html5") { 
+			into 'static/docs'
+		}
+
+        from('src/ebextensions') {
+            into('.ebextensions')
+        }
+	}
+}
+
+project(":admin") {
+    description = "관리자 애플리케이션: 백오피스(BackOffice) 이용"
+
+    version = '0.0.1-SNAPSHOT'
+
+    dependencies {
+        compile project(":core")
+
+        compile('org.springframework.boot:spring-boot-starter-web')
+        compile('org.springframework.boot:spring-boot-starter-security')
+        compile('org.springframework.boot:spring-boot-starter-thymeleaf')
+
+        //webjar
+        compile('org.webjars:jquery:3.3.1')
+        compile('org.webjars:bootstrap:4.1.3')
+
+        testCompile('org.springframework.restdocs:spring-restdocs-mockmvc') // API 문서 제공
+    }
+
+    bootJar {
+        from('src/ebextensions') {
+            into('.ebextensions')
+        }
+    }
+}
+
+project(":batch") {
+    description = "배치"
+
+    version = '0.0.1-SNAPSHOT'
+
+    bootJar.enabled = false
+}
