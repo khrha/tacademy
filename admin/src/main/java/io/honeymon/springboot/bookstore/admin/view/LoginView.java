@@ -10,4 +10,9 @@ public class LoginView {
     public String login() {
         return "login";
     }
+    
+    // RKH
+    public String login2() {
+    	return "abc";s
+    }
 }
